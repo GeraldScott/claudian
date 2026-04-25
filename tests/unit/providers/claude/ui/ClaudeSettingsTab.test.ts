@@ -1,12 +1,10 @@
 import * as fs from 'fs';
 
-import { DEFAULT_CODEX_PROVIDER_SETTINGS } from '@/providers/codex/settings';
-import { codexSettingsTabRenderer } from '@/providers/codex/ui/CodexSettingsTab';
+import { DEFAULT_CLAUDE_PROVIDER_SETTINGS } from '@/providers/claude/settings';
+import { claudeSettingsTabRenderer } from '@/providers/claude/ui/ClaudeSettingsTab';
 
-const mockGetHostnameKey = jest.fn(() => 'host-a');
 const mockRenderEnvironmentSettingsSection = jest.fn();
 const mockSaveSettings = jest.fn().mockResolvedValue(undefined);
-const mockBroadcastToAllTabs = jest.fn().mockResolvedValue(undefined);
 
 jest.mock('fs');
 jest.mock('@/core/providers/ProviderSettingsCoordinator', () => ({
@@ -14,9 +12,9 @@ jest.mock('@/core/providers/ProviderSettingsCoordinator', () => ({
     reconcileTitleGenerationModelSelection: jest.fn((settings: Record<string, unknown>) => {
       const titleGenerationModel = settings.titleGenerationModel;
       const customModels = (
-        settings.providerConfigs as { codex?: { customModels?: string } } | undefined
-      )?.codex?.customModels ?? '';
-      if (titleGenerationModel === 'my-custom-model' && customModels !== 'my-custom-model') {
+        settings.providerConfigs as { claude?: { customModels?: string } } | undefined
+      )?.claude?.customModels ?? '';
+      if (titleGenerationModel === 'claude-opus-4-6' && customModels !== 'claude-opus-4-6') {
         settings.titleGenerationModel = '';
         return true;
       }
@@ -24,6 +22,7 @@ jest.mock('@/core/providers/ProviderSettingsCoordinator', () => ({
     }),
   },
 }));
+
 jest.mock('obsidian', () => {
   class MockSetting {
     public name = '';
@@ -33,7 +32,6 @@ jest.mock('obsidian', () => {
     public textAreaComponents: MockTextAreaComponent[] = [];
     public dropdownComponents: MockDropdownComponent[] = [];
     public toggleComponents: MockToggleComponent[] = [];
-    public settingEl = { style: {} };
 
     constructor(_container: unknown) {
       createdSettings.push(this);
@@ -92,30 +90,56 @@ jest.mock('@/features/settings/ui/EnvironmentSettingsSection', () => ({
   renderEnvironmentSettingsSection: (...args: unknown[]) => mockRenderEnvironmentSettingsSection(...args),
 }));
 
-jest.mock('@/providers/codex/app/CodexWorkspaceServices', () => ({
-  getCodexWorkspaceServices: jest.fn(() => ({
-    commandCatalog: null,
-    subagentStorage: {},
-    refreshAgentMentions: jest.fn(),
+jest.mock('@/features/settings/ui/McpSettingsManager', () => ({
+  McpSettingsManager: jest.fn(),
+}));
+
+jest.mock('@/providers/claude/app/ClaudeWorkspaceServices', () => ({
+  getClaudeWorkspaceServices: jest.fn(() => ({
+    cliResolver: {
+      reset: jest.fn(),
+    },
+    commandCatalog: {},
+    agentManager: {},
+    agentStorage: {},
+    mcpStorage: {},
+    pluginManager: {},
   })),
 }));
 
-jest.mock('@/providers/codex/ui/CodexSkillSettings', () => ({
-  CodexSkillSettings: jest.fn(),
+jest.mock('@/providers/claude/ui/AgentSettings', () => ({
+  AgentSettings: jest.fn(),
 }));
 
-jest.mock('@/providers/codex/ui/CodexSubagentSettings', () => ({
-  CodexSubagentSettings: jest.fn(),
+jest.mock('@/providers/claude/ui/PluginSettingsManager', () => ({
+  PluginSettingsManager: jest.fn(),
+}));
+
+jest.mock('@/providers/claude/ui/SlashCommandSettings', () => ({
+  SlashCommandSettings: jest.fn(),
 }));
 
 jest.mock('@/i18n/i18n', () => ({
   t: (key: string) => key,
 }));
 
-jest.mock('@/utils/env', () => ({
-  ...jest.requireActual('@/utils/env'),
-  getHostnameKey: () => mockGetHostnameKey(),
-}));
+jest.mock('@/utils/env', () => {
+  const actual = jest.requireActual('@/utils/env');
+  return {
+    ...actual,
+    getHostnameKey: () => 'host-a',
+  };
+});
+
+interface MockInputEl {
+  rows: number;
+  cols: number;
+  value: string;
+  style: Record<string, string>;
+  dataset: Record<string, string>;
+  addClass: jest.Mock;
+  addEventListener: jest.Mock;
+}
 
 interface MockTextComponent {
   value: string;
@@ -157,15 +181,6 @@ const createdSettings: Array<{
   toggleComponents: MockToggleComponent[];
 }> = [];
 
-interface MockInputEl {
-  rows: number;
-  cols: number;
-  value: string;
-  style: Record<string, string>;
-  addClass: jest.Mock;
-  addEventListener: jest.Mock;
-}
-
 function createInputEl(): MockInputEl & { _listeners: Map<string, Array<() => void>> } {
   const listeners = new Map<string, Array<() => void>>();
   return {
@@ -173,6 +188,7 @@ function createInputEl(): MockInputEl & { _listeners: Map<string, Array<() => vo
     cols: 0,
     value: '',
     style: {},
+    dataset: {},
     addClass: jest.fn(),
     addEventListener: jest.fn((event: string, handler: () => void) => {
       const handlers = listeners.get(event) ?? [];
@@ -259,6 +275,7 @@ function createElement(): any {
   const element: any = {
     value: '',
     style: {},
+    dataset: {},
     appendText: jest.fn(),
     createEl: jest.fn(() => createElement()),
     createDiv: jest.fn(() => createElement()),
@@ -280,28 +297,29 @@ function createContainer(): any {
 function createPlugin(overrides: Record<string, unknown> = {}): any {
   return {
     settings: {
-      settingsProvider: 'codex',
-      model: 'my-custom-model',
+      settingsProvider: 'claude',
+      model: 'claude-opus-4-6',
       titleGenerationModel: '',
       providerConfigs: {
-        codex: {
-          ...DEFAULT_CODEX_PROVIDER_SETTINGS,
-          enabled: true,
-          customModels: 'my-custom-model',
+        claude: {
+          ...DEFAULT_CLAUDE_PROVIDER_SETTINGS,
+          customModels: 'claude-opus-4-6',
+          lastModel: 'sonnet',
         },
       },
       ...overrides,
     },
     saveSettings: mockSaveSettings,
+    normalizeModelVariantSettings: jest.fn(() => false),
     getView: jest.fn(() => ({
       getTabManager: jest.fn(() => ({
-        broadcastToAllTabs: mockBroadcastToAllTabs,
+        broadcastToAllTabs: jest.fn().mockResolvedValue(undefined),
       })),
     })),
     app: {
       vault: {
         adapter: {
-          basePath: 'C:\\vault',
+          basePath: '/test/vault',
         },
       },
     },
@@ -311,8 +329,8 @@ function createPlugin(overrides: Record<string, unknown> = {}): any {
 function createContext(plugin: any) {
   return {
     plugin,
-    renderHiddenProviderCommandSetting: jest.fn(),
     refreshModelSelectors: jest.fn(),
+    renderHiddenProviderCommandSetting: jest.fn(),
     renderCustomContextLimits: jest.fn(),
   };
 }
@@ -325,18 +343,9 @@ function findSetting(name: string) {
   return setting;
 }
 
-function findOptionalSetting(name: string) {
-  return createdSettings.find(candidate => candidate.name === name);
-}
-
-describe('CodexSettingsTab', () => {
+describe('ClaudeSettingsTab', () => {
   const mockedExistsSync = fs.existsSync as jest.MockedFunction<typeof fs.existsSync>;
   const mockedStatSync = fs.statSync as jest.MockedFunction<typeof fs.statSync>;
-  const originalPlatform = process.platform;
-
-  afterAll(() => {
-    Object.defineProperty(process, 'platform', { value: originalPlatform });
-  });
 
   beforeEach(() => {
     createdSettings.length = 0;
@@ -345,179 +354,41 @@ describe('CodexSettingsTab', () => {
     mockedStatSync.mockReturnValue({ isFile: () => true } as fs.Stats);
   });
 
-  it('renders installation method and WSL distro override controls on Windows', () => {
-    Object.defineProperty(process, 'platform', { value: 'win32' });
-    const plugin = createPlugin();
-
-    codexSettingsTabRenderer.render(createContainer(), createContext(plugin));
-
-    expect(findSetting('Installation method').dropdownComponents).toHaveLength(1);
-    expect(findSetting('WSL distro override').textComponents).toHaveLength(1);
-  });
-
-  it('hides Windows-only installation controls on non-Windows platforms', () => {
-    Object.defineProperty(process, 'platform', { value: 'darwin' });
-    const plugin = createPlugin();
-
-    codexSettingsTabRenderer.render(createContainer(), createContext(plugin));
-
-    expect(findOptionalSetting('Installation method')).toBeUndefined();
-    expect(findOptionalSetting('WSL distro override')).toBeUndefined();
-  });
-
-  it('uses host-native CLI path behavior on non-Windows even when WSL is saved', async () => {
-    Object.defineProperty(process, 'platform', { value: 'darwin' });
-    const plugin = createPlugin({
-      providerConfigs: {
-        codex: {
-          enabled: true,
-          safeMode: 'workspace-write',
-          cliPath: '',
-          cliPathsByHost: {},
-          reasoningSummary: 'detailed',
-          environmentVariables: '',
-          environmentHash: '',
-          installationMethod: 'wsl',
-          installationMethodsByHost: {
-            'host-a': 'wsl',
-          },
-          wslDistroOverride: 'Ubuntu',
-          wslDistroOverridesByHost: {
-            'host-a': 'Ubuntu',
-          },
-        },
-      },
-    });
-
-    codexSettingsTabRenderer.render(createContainer(), createContext(plugin));
-
-    const cliPathSetting = findSetting('Codex CLI path (host-a)');
-    expect(cliPathSetting.desc).toBe('Custom path to the local Codex CLI. Leave empty for auto-detection from PATH.');
-    expect(cliPathSetting.textComponents[0].placeholder).toBe('/usr/local/bin/codex');
-
-    await cliPathSetting.textComponents[0].onChangeCallback?.('codex');
-
-    expect(plugin.settings.providerConfigs.codex.cliPathsByHost['host-a']).toBeUndefined();
-    expect(mockSaveSettings).toHaveBeenCalledTimes(0);
-    expect(mockBroadcastToAllTabs).toHaveBeenCalledTimes(0);
-  });
-
-  it('accepts a Linux-side CLI command when installation method is WSL', async () => {
-    Object.defineProperty(process, 'platform', { value: 'win32' });
-    const plugin = createPlugin();
-
-    codexSettingsTabRenderer.render(createContainer(), createContext(plugin));
-
-    const installationMethodSetting = findSetting('Installation method');
-    await installationMethodSetting.dropdownComponents[0].onChangeCallback?.('wsl');
-
-    const cliPathSetting = findSetting('Codex CLI path (host-a)');
-    await cliPathSetting.textComponents[0].onChangeCallback?.('codex');
-
-    expect(plugin.settings.providerConfigs.codex.installationMethodsByHost).toEqual({
-      'host-a': 'wsl',
-    });
-    expect(plugin.settings.providerConfigs.codex.cliPathsByHost['host-a']).toBe('codex');
-    expect(mockSaveSettings).toHaveBeenCalled();
-    expect(mockBroadcastToAllTabs).toHaveBeenCalled();
-  });
-
-  it('rejects a Windows-native CLI path when installation method is WSL', async () => {
-    Object.defineProperty(process, 'platform', { value: 'win32' });
-    const plugin = createPlugin({
-      providerConfigs: {
-        codex: {
-          ...DEFAULT_CODEX_PROVIDER_SETTINGS,
-          enabled: true,
-          cliPathsByHost: {
-            'host-a': 'C:\\Users\\me\\AppData\\Roaming\\npm\\codex.exe',
-          },
-        },
-      },
-    });
-
-    codexSettingsTabRenderer.render(createContainer(), createContext(plugin));
-
-    const installationMethodSetting = findSetting('Installation method');
-    await installationMethodSetting.dropdownComponents[0].onChangeCallback?.('wsl');
-
-    const cliPathSetting = findSetting('Codex CLI path (host-a)');
-    await cliPathSetting.textComponents[0].onChangeCallback?.('C:\\Users\\me\\AppData\\Roaming\\npm\\codex.exe');
-
-    expect(plugin.settings.providerConfigs.codex.installationMethodsByHost).toEqual({
-      'host-a': 'wsl',
-    });
-    expect(plugin.settings.providerConfigs.codex.cliPathsByHost['host-a']).toBe(
-      'C:\\Users\\me\\AppData\\Roaming\\npm\\codex.exe',
-    );
-    expect(mockBroadcastToAllTabs).toHaveBeenCalledTimes(0);
-  });
-
   it('does not switch the active model while the custom models textarea is mid-edit', async () => {
-    Object.defineProperty(process, 'platform', { value: 'darwin' });
     const plugin = createPlugin();
     const context = createContext(plugin);
 
-    codexSettingsTabRenderer.render(createContainer(), context);
+    claudeSettingsTabRenderer.render(createContainer(), context);
 
-    const customModelsSetting = findSetting('Custom models');
+    const customModelsSetting = findSetting('settings.customModels.name');
     const customModelsTextArea = customModelsSetting.textAreaComponents[0];
 
-    await customModelsTextArea.onChangeCallback?.('different-custom-model');
+    await customModelsTextArea.onChangeCallback?.('claude-opus-4-7');
 
-    expect(plugin.settings.providerConfigs.codex.customModels).toBe('my-custom-model');
-    expect(plugin.settings.model).toBe('my-custom-model');
+    expect(plugin.settings.providerConfigs.claude.customModels).toBe('claude-opus-4-6');
+    expect(plugin.settings.model).toBe('claude-opus-4-6');
     expect(mockSaveSettings).not.toHaveBeenCalled();
     expect(context.refreshModelSelectors).not.toHaveBeenCalled();
   });
 
   it('reconciles removed custom models on blur and clears stale title model selections', async () => {
-    Object.defineProperty(process, 'platform', { value: 'darwin' });
     const plugin = createPlugin({
-      titleGenerationModel: 'my-custom-model',
+      titleGenerationModel: 'claude-opus-4-6',
     });
     const context = createContext(plugin);
 
-    codexSettingsTabRenderer.render(createContainer(), context);
+    claudeSettingsTabRenderer.render(createContainer(), context);
 
-    const customModelsSetting = findSetting('Custom models');
+    const customModelsSetting = findSetting('settings.customModels.name');
     const customModelsTextArea = customModelsSetting.textAreaComponents[0];
 
-    await customModelsTextArea.onChangeCallback?.('different-custom-model');
+    await customModelsTextArea.onChangeCallback?.('claude-opus-4-7');
     await customModelsTextArea.trigger('blur');
 
-    expect(plugin.settings.providerConfigs.codex.customModels).toBe('different-custom-model');
-    expect(plugin.settings.model).toBe('gpt-5.4-mini');
+    expect(plugin.settings.providerConfigs.claude.customModels).toBe('claude-opus-4-7');
+    expect(plugin.settings.model).toBe('sonnet');
     expect(plugin.settings.titleGenerationModel).toBe('');
     expect(mockSaveSettings).toHaveBeenCalledTimes(1);
     expect(context.refreshModelSelectors).toHaveBeenCalledTimes(1);
-  });
-
-  it('reconciles an inactive Codex saved model when a removed custom model was selected', async () => {
-    Object.defineProperty(process, 'platform', { value: 'darwin' });
-    const plugin = createPlugin({
-      settingsProvider: 'claude',
-      model: 'haiku',
-      savedProviderModel: {
-        claude: 'haiku',
-        codex: 'my-custom-model',
-      },
-    });
-    const context = createContext(plugin);
-
-    codexSettingsTabRenderer.render(createContainer(), context);
-
-    const customModelsSetting = findSetting('Custom models');
-    const customModelsTextArea = customModelsSetting.textAreaComponents[0];
-
-    await customModelsTextArea.onChangeCallback?.('different-custom-model');
-    await customModelsTextArea.trigger('blur');
-
-    expect(plugin.settings.model).toBe('haiku');
-    expect(plugin.settings.savedProviderModel).toEqual({
-      claude: 'haiku',
-      codex: 'gpt-5.4-mini',
-    });
-    expect(mockSaveSettings).toHaveBeenCalledTimes(1);
   });
 });
